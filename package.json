@@ -1,0 +1,32 @@
+{
+  "name": "agency-discovery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local CLI for discovering and verifying development agencies.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "dev": "tsx --env-file=.env src/cli.ts",
+    "test": "tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.10.1",
+    "cheerio": "^1.0.0",
+    "pino": "^9.7.0",
+    "playwright": "^1.55.1",
+    "tldts": "^7.0.13",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.57",
+    "prisma": "^6.10.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

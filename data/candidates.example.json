@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Example Shopify Agency",
+    "websiteUrl": "https://www.example.com/?utm_source=seed",
+    "sourceUrl": "https://directory.example/agencies/example-shopify-agency",
+    "discoverySource": "local-example",
+    "evidence": "Example record for testing the local discovery command."
+  }
+]

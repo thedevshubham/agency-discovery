@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum DiscoveryStatus {
+  DISCOVERED
+  WEBSITE_VERIFIED
+  SHOPIFY_VERIFIED
+  CAREERS_CHECKED
+  COMPLETE
+  REJECTED
+  FAILED
+}
+
+model Agency {
+  id                Int             @id @default(autoincrement())
+  name              String
+  normalizedName    String
+  websiteUrl        String?
+  canonicalDomain   String?         @unique
+  careersUrl        String?
+  atsProvider       String?
+  atsUrl             String?
+  isShopifyFocused  Boolean?
+  discoveryEvidence String?
+  shopifyEvidence   String?
+  discoverySource   String
+  sourceUrls        String
+  status             DiscoveryStatus @default(DISCOVERED)
+  rejectionReason   String?
+  lastError          String?
+  attemptCount       Int             @default(0)
+  discoveredAt      DateTime        @default(now())
+  websiteVerifiedAt DateTime?
+  shopifyVerifiedAt DateTime?
+  careersCheckedAt  DateTime?
+  completedAt       DateTime?
+  lastAttemptedAt   DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([status])
+  @@index([normalizedName])
+  @@index([atsProvider])
+}
