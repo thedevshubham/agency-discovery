@@ -8,6 +8,8 @@ This project is source-agnostic and is being built incrementally. Shopify's publ
 
 - Crawl the public Shopify service-partner directory across dynamically detected pages.
 - Extract partner names and Shopify profile URLs with Cheerio.
+- Extract official homepages from Shopify partner profiles and follow redirects.
+- Find linked careers pages and check a bounded set of common careers paths.
 - Import candidates from a local JSON file for controlled testing.
 - Validate runtime data and configuration with Zod.
 - Normalize URLs, remove tracking parameters, and extract registrable domains.
@@ -70,6 +72,18 @@ sequenceDiagram
     Pipeline->>DB: Create, update, or skip each candidate
     DB-->>Pipeline: Stored records
     Pipeline-->>CLI: Run summary
+```
+
+Homepage and careers enrichment is a second command that processes stored candidates in safe batches:
+
+```text
+DISCOVERED record
+  → Shopify partner profile
+  → official external homepage
+  → canonical domain
+  → homepage careers links
+  → bounded common-path fallbacks
+  → CAREERS_CHECKED
 ```
 
 ## Technology
@@ -218,6 +232,28 @@ Candidate format:
 
 `websiteUrl` and `evidence` are optional. The name, source URL, and discovery source are required.
 
+### Find official homepages and careers pages
+
+Process the next 25 eligible Shopify candidates:
+
+```bash
+npm run dev -- enrich
+```
+
+Use a smaller or larger batch:
+
+```bash
+npm run dev -- enrich 10
+```
+
+Process every remaining eligible candidate:
+
+```bash
+npm run dev -- enrich all
+```
+
+Start with a small batch. Each record requires the Shopify profile, the official homepage, and potentially several common careers paths. Successful records store `websiteUrl`, `canonicalDomain`, `careersUrl` when found, verification timestamps, and `CAREERS_CHECKED` status. A checked null careers URL is a valid result.
+
 ### Inspect stored data
 
 ```bash
@@ -233,6 +269,7 @@ Prisma Studio opens a local browser interface for the `Agency` table. No MySQL, 
 | `npm run dev` | Show database status. |
 | `npm run dev -- discover-shopify [maxPages]` | Discover Shopify directory candidates. |
 | `npm run dev -- discover <file>` | Import candidates from JSON. |
+| `npm run dev -- enrich [limit\|all]` | Resolve homepages and find careers pages; defaults to 25 records. |
 | `npm test` | Run automated tests. |
 | `npm run typecheck` | Check TypeScript types. |
 | `npm run db:migrate` | Apply Prisma migrations. |
@@ -255,22 +292,19 @@ DISCOVERED
 
 ## Current limitations
 
-- Discovery captures the Shopify profile URL, not yet the partner's external official website.
 - The directory includes individuals and non-agency service partners; classification is not implemented yet.
-- Careers pages and ATS providers are not detected yet.
+- Careers detection uses static HTML and bounded common paths; JavaScript-only navigation may require the planned Playwright fallback.
+- ATS providers are not detected yet.
 - Individual job listings are intentionally out of scope.
 - Shopify can change its HTML structure; parser tests cover the expected structure, but selectors may eventually require maintenance.
 - This is a personal local tool, not a distributed crawler.
 
 ## Planned next stages
 
-1. Fetch each Shopify partner profile and extract its external website.
-2. Follow redirects and verify the official canonical domain.
-3. Distinguish agencies from freelancers and irrelevant service providers.
-4. Confirm Shopify focus with stored evidence.
-5. Find careers pages.
-6. Detect known ATS providers.
-7. Perform final domain-based deduplication.
+1. Distinguish agencies from freelancers and irrelevant service providers.
+2. Add a Playwright fallback for JavaScript-only websites.
+3. Detect known ATS providers.
+4. Perform final domain-based deduplication and provenance merging.
 
 ## Responsible use
 

@@ -2,6 +2,11 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 5_000_000;
 const DEFAULT_RETRIES = 2;
 
+export type HtmlDocument = {
+  html: string;
+  url: string;
+};
+
 export type FetchHtmlOptions = {
   timeoutMs?: number;
   maxResponseBytes?: number;
@@ -15,7 +20,7 @@ function delay(milliseconds: number): Promise<void> {
 async function fetchHtmlOnce(
   url: string,
   options: Required<FetchHtmlOptions>,
-): Promise<string> {
+): Promise<HtmlDocument> {
   const response = await fetch(url, {
     headers: {
       accept: "text/html,application/xhtml+xml",
@@ -48,13 +53,16 @@ async function fetchHtmlOnce(
     throw new Error(`HTML response exceeds size limit: ${url}`);
   }
 
-  return new TextDecoder().decode(body);
+  return {
+    html: new TextDecoder().decode(body),
+    url: response.url,
+  };
 }
 
-export async function fetchHtml(
+export async function fetchHtmlDocument(
   url: string,
   options: FetchHtmlOptions = {},
-): Promise<string> {
+): Promise<HtmlDocument> {
   const resolvedOptions: Required<FetchHtmlOptions> = {
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxResponseBytes:
@@ -78,4 +86,11 @@ export async function fetchHtml(
   throw new Error(`Unable to fetch HTML after retries: ${url}`, {
     cause: lastError,
   });
+}
+
+export async function fetchHtml(
+  url: string,
+  options: FetchHtmlOptions = {},
+): Promise<string> {
+  return (await fetchHtmlDocument(url, options)).html;
 }
