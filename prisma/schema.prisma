@@ -17,6 +17,11 @@ enum DiscoveryStatus {
   FAILED
 }
 
+enum JobStatus {
+  ACTIVE
+  INACTIVE
+}
+
 model Agency {
   id                Int             @id @default(autoincrement())
   name              String
@@ -39,12 +44,42 @@ model Agency {
   websiteVerifiedAt DateTime?
   shopifyVerifiedAt DateTime?
   careersCheckedAt  DateTime?
+  jobsCheckedAt     DateTime?
   completedAt       DateTime?
   lastAttemptedAt   DateTime?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
+  jobs               Job[]
 
   @@index([status])
   @@index([normalizedName])
   @@index([atsProvider])
+}
+
+model Job {
+  id               Int       @id @default(autoincrement())
+  agencyId         Int
+  agency           Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  title            String
+  normalizedTitle  String
+  location         String?
+  workplaceType    String?
+  employmentType   String?
+  description      String?
+  jobUrl           String
+  applicationUrl   String?
+  canonicalJobKey  String    @unique
+  source           String
+  externalId       String?
+  status           JobStatus @default(ACTIVE)
+  postedAt         DateTime?
+  firstSeenAt      DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([normalizedTitle])
+  @@index([status])
+  @@index([source, externalId])
 }

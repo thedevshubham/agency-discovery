@@ -3,6 +3,7 @@ import { loadCandidatesFromJson } from "./discovery/sources/local-json.js";
 import { discoverShopifyPartners } from "./discovery/sources/shopify-directory.js";
 import { logger } from "./logger.js";
 import { discoverCandidates } from "./pipeline/discover.js";
+import { discoverJobs } from "./pipeline/discover-jobs.js";
 import { enrichAgencies } from "./pipeline/enrich.js";
 
 async function showStatus(): Promise<void> {
@@ -70,6 +71,37 @@ async function runEnrichment(limitValue: string | undefined): Promise<void> {
   logger.info(summary, "Homepage and careers enrichment completed");
 }
 
+function parseLimit(value: string | undefined, defaultValue: number): number | undefined {
+  const effectiveValue = value ?? String(defaultValue);
+
+  if (effectiveValue.toLowerCase() === "all") {
+    return undefined;
+  }
+
+  const limit = Number.parseInt(effectiveValue, 10);
+
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error("limit must be a positive integer or 'all'");
+  }
+
+  return limit;
+}
+
+async function runJobDiscovery(limitValue: string | undefined): Promise<void> {
+  const limit = parseLimit(limitValue, 10);
+  const summary = await discoverJobs({
+    ...(limit ? { limit } : {}),
+    onAgency: ({ agencyId, name, processed, total, jobsFound }) => {
+      logger.info(
+        { agencyId, name, processed, total, jobsFound },
+        "Careers page processed for jobs",
+      );
+    },
+  });
+
+  logger.info(summary, "Job discovery completed");
+}
+
 async function main(): Promise<void> {
   const [command = "status", argument] = process.argv.slice(2);
 
@@ -86,9 +118,12 @@ async function main(): Promise<void> {
     case "enrich":
       await runEnrichment(argument);
       break;
+    case "discover-jobs":
+      await runJobDiscovery(argument);
+      break;
     default:
       throw new Error(
-        `Unknown command: ${command}. Available commands: status, discover, discover-shopify, enrich`,
+        `Unknown command: ${command}. Available commands: status, discover, discover-shopify, enrich, discover-jobs`,
       );
   }
 }
