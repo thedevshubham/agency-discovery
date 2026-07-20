@@ -12,6 +12,8 @@ import { isCareersPage } from "../services/careers.js";
 
 export type JobDiscoveryOptions = {
   limit?: number;
+  jobLimit?: number;
+  agencyIds?: number[];
   delayMs?: number;
   onAgency?: (progress: {
     agencyId: number;
@@ -28,7 +30,7 @@ export type JobDiscoverySummary = {
   jobsFound: number;
   jobsCreated: number;
   jobsUpdated: number;
-  jobsDeactivated: number;
+  jobsDeleted: number;
   invalidCareersPages: number;
   failed: number;
 };
@@ -40,7 +42,8 @@ function wait(milliseconds: number): Promise<void> {
 async function saveJobs(
   agencyId: number,
   candidates: JobCandidate[],
-): Promise<{ created: number; updated: number; deactivated: number }> {
+  deleteMissing: boolean,
+): Promise<{ created: number; updated: number; deleted: number }> {
   const seenKeys: string[] = [];
   let created = 0;
   let updated = 0;
@@ -55,7 +58,6 @@ async function saveJobs(
       title: candidate.title,
       normalizedTitle: normalizeJobTitle(candidate.title),
       jobUrl: candidate.jobUrl,
-      applicationUrl: candidate.applicationUrl ?? null,
       location: candidate.location ?? null,
       workplaceType: candidate.workplaceType ?? null,
       employmentType: candidate.employmentType ?? null,
@@ -84,27 +86,28 @@ async function saveJobs(
     }
   }
 
-  if (seenKeys.length === 0) {
-    return { created, updated, deactivated: 0 };
+  if (!deleteMissing) {
+    return { created, updated, deleted: 0 };
   }
 
-  const deactivated = await db.job.updateMany({
+  const deleted = await db.job.deleteMany({
     where: {
       agencyId,
-      status: JobStatus.ACTIVE,
       canonicalJobKey: { notIn: seenKeys },
     },
-    data: { status: JobStatus.INACTIVE },
   });
 
-  return { created, updated, deactivated: deactivated.count };
+  return { created, updated, deleted: deleted.count };
 }
 
 export async function discoverJobs(
   options: JobDiscoveryOptions = {},
 ): Promise<JobDiscoverySummary> {
   const agencies = await db.agency.findMany({
-    where: { careersUrl: { not: null } },
+    where: {
+      careersUrl: { not: null },
+      ...(options.agencyIds ? { id: { in: options.agencyIds } } : {}),
+    },
     orderBy: [{ jobsCheckedAt: "asc" }, { id: "asc" }],
     ...(options.limit ? { take: options.limit } : {}),
   });
@@ -114,7 +117,7 @@ export async function discoverJobs(
     jobsFound: 0,
     jobsCreated: 0,
     jobsUpdated: 0,
-    jobsDeactivated: 0,
+    jobsDeleted: 0,
     invalidCareersPages: 0,
     failed: 0,
   };
@@ -135,13 +138,20 @@ export async function discoverJobs(
           },
         });
       } else {
-        const candidates = parseGenericJobsPage(document.html, document.url);
-        const saved = await saveJobs(agency.id, candidates);
+        const parsedCandidates = parseGenericJobsPage(document.html, document.url);
+        const candidates = options.jobLimit
+          ? parsedCandidates.slice(0, options.jobLimit)
+          : parsedCandidates;
+        const saved = await saveJobs(
+          agency.id,
+          candidates,
+          options.jobLimit === undefined,
+        );
         jobsFound = candidates.length;
         summary.jobsFound += jobsFound;
         summary.jobsCreated += saved.created;
         summary.jobsUpdated += saved.updated;
-        summary.jobsDeactivated += saved.deactivated;
+        summary.jobsDeleted += saved.deleted;
 
         await db.agency.update({
           where: { id: agency.id },

@@ -30,16 +30,16 @@ model Agency {
   canonicalDomain   String?         @unique
   careersUrl        String?
   atsProvider       String?
-  atsUrl             String?
+  atsUrl            String?
   isShopifyFocused  Boolean?
   discoveryEvidence String?
   shopifyEvidence   String?
   discoverySource   String
   sourceUrls        String
-  status             DiscoveryStatus @default(DISCOVERED)
+  status            DiscoveryStatus @default(DISCOVERED)
   rejectionReason   String?
-  lastError          String?
-  attemptCount       Int             @default(0)
+  lastError         String?
+  attemptCount      Int             @default(0)
   discoveredAt      DateTime        @default(now())
   websiteVerifiedAt DateTime?
   shopifyVerifiedAt DateTime?
@@ -47,9 +47,9 @@ model Agency {
   jobsCheckedAt     DateTime?
   completedAt       DateTime?
   lastAttemptedAt   DateTime?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  jobs               Job[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  jobs              Job[]
 
   @@index([status])
   @@index([normalizedName])
@@ -57,29 +57,65 @@ model Agency {
 }
 
 model Job {
-  id               Int       @id @default(autoincrement())
-  agencyId         Int
-  agency           Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  title            String
-  normalizedTitle  String
-  location         String?
-  workplaceType    String?
-  employmentType   String?
-  description      String?
-  jobUrl           String
-  applicationUrl   String?
-  canonicalJobKey  String    @unique
-  source           String
-  externalId       String?
-  status           JobStatus @default(ACTIVE)
-  postedAt         DateTime?
-  firstSeenAt      DateTime  @default(now())
-  lastSeenAt       DateTime  @default(now())
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id              Int             @id @default(autoincrement())
+  agencyId        Int
+  agency          Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  title           String
+  normalizedTitle String
+  location        String?
+  workplaceType   String?
+  employmentType  String?
+  description     String?
+  jobUrl          String
+  canonicalJobKey String          @unique
+  source          String
+  externalId      String?
+  status          JobStatus       @default(ACTIVE)
+  postedAt        DateTime?
+  firstSeenAt     DateTime        @default(now())
+  lastSeenAt      DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  matches         JobMatch[]
 
   @@index([agencyId])
   @@index([normalizedTitle])
   @@index([status])
   @@index([source, externalId])
+}
+
+model Resume {
+  id             Int              @id @default(autoincrement())
+  fileName       String
+  sourcePath     String
+  contentHash    String           @unique
+  rawText        String
+  pageCount      Int
+  characterCount Int
+  isActive       Boolean          @default(true)
+  importedAt     DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  matches        JobMatch[]
+
+  @@index([isActive])
+}
+
+model JobMatch {
+  id           Int      @id @default(autoincrement())
+  resumeId     Int
+  resume       Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  jobId        Int
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  score        Int
+  titleScore   Int
+  skillScore   Int
+  matchedTerms String
+  missingTerms String
+  calculatedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([resumeId, jobId])
+  @@index([resumeId, score])
+  @@index([jobId])
 }

@@ -12,6 +12,7 @@ export type DiscoverySummary = {
   created: number;
   updated: number;
   skipped: number;
+  agencyIds: number[];
 };
 
 function parseSourceUrls(value: string): string[] {
@@ -58,7 +59,9 @@ async function findExistingCandidate(
   );
 }
 
-async function saveCandidate(candidate: AgencyCandidate): Promise<"created" | "updated" | "skipped"> {
+async function saveCandidate(
+  candidate: AgencyCandidate,
+): Promise<{ result: "created" | "updated" | "skipped"; agencyId: number }> {
   const normalizedName = normalizeAgencyName(candidate.name);
   const canonicalDomain = candidate.websiteUrl
     ? getCanonicalDomain(candidate.websiteUrl)
@@ -70,7 +73,7 @@ async function saveCandidate(candidate: AgencyCandidate): Promise<"created" | "u
   );
 
   if (!existing) {
-    await db.agency.create({
+    const created = await db.agency.create({
       data: {
         name: candidate.name,
         normalizedName,
@@ -84,7 +87,7 @@ async function saveCandidate(candidate: AgencyCandidate): Promise<"created" | "u
       },
     });
 
-    return "created";
+    return { result: "created", agencyId: created.id };
   }
 
   const sourceUrls = addSourceUrl(existing.sourceUrls, candidate.sourceUrl);
@@ -99,7 +102,7 @@ async function saveCandidate(candidate: AgencyCandidate): Promise<"created" | "u
     websiteUrl === existing.websiteUrl &&
     discoveryEvidence === existing.discoveryEvidence
   ) {
-    return "skipped";
+    return { result: "skipped", agencyId: existing.id };
   }
 
   await db.agency.update({
@@ -111,7 +114,7 @@ async function saveCandidate(candidate: AgencyCandidate): Promise<"created" | "u
     },
   });
 
-  return "updated";
+  return { result: "updated", agencyId: existing.id };
 }
 
 export async function discoverCandidates(
@@ -122,11 +125,13 @@ export async function discoverCandidates(
     created: 0,
     updated: 0,
     skipped: 0,
+    agencyIds: [],
   };
 
   for (const candidate of candidates) {
-    const result = await saveCandidate(candidate);
-    summary[result] += 1;
+    const saved = await saveCandidate(candidate);
+    summary[saved.result] += 1;
+    summary.agencyIds.push(saved.agencyId);
   }
 
   return summary;

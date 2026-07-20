@@ -15,12 +15,15 @@ export type ShopifyDirectoryPage = {
 };
 
 export type ShopifyDiscoveryOptions = {
+  directoryUrl?: string;
+  limit?: number;
   maxPages?: number;
   pageDelayMs?: number;
   onPage?: (progress: {
     page: number;
     totalPages: number | null;
     discovered: number;
+    directoryUrl: string;
   }) => void;
 };
 
@@ -28,14 +31,35 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function buildPageUrl(page: number): string {
-  const url = new URL(SHOPIFY_DIRECTORY_URL);
+function buildPageUrl(directoryUrl: string, page: number): string {
+  const url = new URL(directoryUrl);
 
   if (page > 1) {
     url.searchParams.set("page", String(page));
   }
 
   return url.toString();
+}
+
+function extractDirectoryLinks(html: string, pageUrl: string): string[] {
+  const $ = load(html);
+  const links = new Set<string>();
+
+  $('a[href*="/partners/directory/"]').each((_, element) => {
+    const href = $(element).attr("href");
+
+    if (!href || href.includes("/partners/directory/partner/")) return;
+
+    const url = new URL(href, pageUrl);
+    url.search = "";
+    url.hash = "";
+
+    if (url.pathname !== new URL(pageUrl).pathname) {
+      links.add(url.toString().replace(/\/$/, ""));
+    }
+  });
+
+  return [...links];
 }
 
 export function parseShopifyDirectoryPage(
@@ -85,45 +109,59 @@ export async function discoverShopifyPartners(
 ): Promise<AgencyCandidate[]> {
   const pageDelayMs = options.pageDelayMs ?? DEFAULT_PAGE_DELAY_MS;
   const candidatesByProfileUrl = new Map<string, AgencyCandidate>();
-  let page = 1;
-  let totalPages: number | null = null;
+  const directoryQueue = [options.directoryUrl ?? SHOPIFY_DIRECTORY_URL];
+  const visitedDirectories = new Set<string>();
 
-  while (!options.maxPages || page <= options.maxPages) {
-    const html = await fetchHtml(buildPageUrl(page));
-    const parsed = parseShopifyDirectoryPage(html);
+  while (directoryQueue.length > 0 && (!options.limit || candidatesByProfileUrl.size < options.limit)) {
+    const directoryUrl = directoryQueue.shift()!;
 
-    if (parsed.candidates.length === 0) {
-      break;
-    }
+    if (visitedDirectories.has(directoryUrl)) continue;
+    visitedDirectories.add(directoryUrl);
 
-    if (page === 1 && parsed.totalPartners !== null) {
-      totalPages = Math.ceil(parsed.totalPartners / parsed.candidates.length);
-    }
+    let page = 1;
+    let totalPages: number | null = null;
 
-    const countBeforePage = candidatesByProfileUrl.size;
+    while (
+      (!options.maxPages || page <= options.maxPages) &&
+      (!options.limit || candidatesByProfileUrl.size < options.limit)
+    ) {
+      const pageUrl = buildPageUrl(directoryUrl, page);
+      const html = await fetchHtml(pageUrl);
+      const parsed = parseShopifyDirectoryPage(html);
 
-    for (const candidate of parsed.candidates) {
-      candidatesByProfileUrl.set(candidate.sourceUrl, candidate);
-    }
+      if (parsed.candidates.length === 0) {
+        if (page === 1) {
+          directoryQueue.push(...extractDirectoryLinks(html, pageUrl));
+        }
+        break;
+      }
 
-    options.onPage?.({
-      page,
-      totalPages,
-      discovered: candidatesByProfileUrl.size,
-    });
+      if (page === 1 && parsed.totalPartners !== null) {
+        totalPages = Math.ceil(parsed.totalPartners / parsed.candidates.length);
+      }
 
-    const addedOnPage = candidatesByProfileUrl.size - countBeforePage;
+      const countBeforePage = candidatesByProfileUrl.size;
 
-    if (addedOnPage === 0 || (totalPages !== null && page >= totalPages)) {
-      break;
-    }
+      for (const candidate of parsed.candidates) {
+        candidatesByProfileUrl.set(candidate.sourceUrl, candidate);
+        if (options.limit && candidatesByProfileUrl.size >= options.limit) break;
+      }
 
-    page += 1;
+      options.onPage?.({
+        page,
+        totalPages,
+        discovered: candidatesByProfileUrl.size,
+        directoryUrl,
+      });
 
-    if (pageDelayMs > 0) {
-      await wait(pageDelayMs);
+      const addedOnPage = candidatesByProfileUrl.size - countBeforePage;
+      if (addedOnPage === 0 || (totalPages !== null && page >= totalPages)) break;
+
+      page += 1;
+      if (pageDelayMs > 0) await wait(pageDelayMs);
     }
   }
 
-  return [...candidatesByProfileUrl.values()];
+  const candidates = [...candidatesByProfileUrl.values()];
+  return options.limit ? candidates.slice(0, options.limit) : candidates;
 }

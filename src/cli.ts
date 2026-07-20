@@ -1,136 +1,152 @@
+import { parseRequiredLimit } from "./cli/arguments.js";
+import { crawlUrl, type CrawlLimit } from "./crawl/pipeline.js";
 import { db } from "./db.js";
-import { loadCandidatesFromJson } from "./discovery/sources/local-json.js";
-import { discoverShopifyPartners } from "./discovery/sources/shopify-directory.js";
 import { logger } from "./logger.js";
-import { discoverCandidates } from "./pipeline/discover.js";
-import { discoverJobs } from "./pipeline/discover-jobs.js";
-import { enrichAgencies } from "./pipeline/enrich.js";
+import {
+  isLikelyJobPageUrl,
+  isRelevantJobRole,
+} from "./matching/eligibility.js";
+import { listJobMatches, matchJobs } from "./pipeline/match-jobs.js";
+import { reportProgress } from "./progress.js";
+import {
+  getActiveResume,
+  updateResume,
+  uploadResume,
+} from "./resumes/service.js";
+
+type RequiredLimit = number | "all";
 
 async function showStatus(): Promise<void> {
-  const agencyCount = await db.agency.count();
+  const [agencyCount, jobCount, activeResumeCount, jobMatchCount] =
+    await Promise.all([
+      db.agency.count(),
+      db.job.count(),
+      db.resume.count({ where: { isActive: true } }),
+      db.jobMatch.count(),
+    ]);
 
-  logger.info({ agencyCount }, "Agency discovery database is ready");
+  logger.info(
+    { agencyCount, jobCount, activeResumeCount, jobMatchCount },
+    "Local workflow status",
+  );
 }
 
-async function runDiscovery(filePath: string | undefined): Promise<void> {
-  if (!filePath) {
-    throw new Error("Usage: npm run dev -- discover <path-to-candidates.json>");
+async function runCrawl(arguments_: string[]): Promise<void> {
+  const [url, countValue] = arguments_;
+  if (!url) throw new Error("Usage: npm run dev -- crawl <url> <count|--all>");
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    throw new Error(`Invalid crawl URL: ${url}`);
+  }
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    throw new Error("Crawl URL must use HTTP or HTTPS");
   }
 
-  const candidates = await loadCandidatesFromJson(filePath);
-  const summary = await discoverCandidates(candidates);
-
-  logger.info(summary, "Candidate discovery completed");
+  const limit = parseRequiredLimit(
+    countValue,
+    "npm run dev -- crawl <url> <count|--all>",
+  ) as CrawlLimit;
+  logger.info({ url: parsedUrl.toString(), limit }, "Crawl started");
+  logger.info(await crawlUrl(parsedUrl.toString(), limit), "Crawl completed");
 }
 
-async function runShopifyDiscovery(maxPagesValue: string | undefined): Promise<void> {
-  const maxPages = maxPagesValue ? Number.parseInt(maxPagesValue, 10) : undefined;
-
-  if (maxPagesValue && (!Number.isInteger(maxPages) || (maxPages ?? 0) < 1)) {
-    throw new Error("max-pages must be a positive integer");
+async function runResume(arguments_: string[]): Promise<void> {
+  const [action, filePath] = arguments_;
+  if (action === "status") {
+    const resume = await getActiveResume();
+    logger.info(resume ? { resume } : {}, resume ? "Active resume" : "No active resume");
+    return;
   }
+  if (action === "upload" || action === "update") {
+    if (!filePath) {
+      throw new Error(`Usage: npm run dev -- resume ${action} <file.pdf>`);
+    }
+    const resume = action === "upload"
+      ? await uploadResume(filePath)
+      : await updateResume(filePath);
+    logger.info(resume, action === "upload" ? "Resume uploaded" : "Active resume updated");
+    return;
+  }
+  throw new Error("Usage: npm run dev -- resume <upload|status|update> [file.pdf]");
+}
 
-  const candidates = await discoverShopifyPartners({
-    ...(maxPages ? { maxPages } : {}),
-    onPage: ({ page, discovered, totalPages }) => {
-      logger.info(
-        { page, totalPages, discovered },
-        "Shopify directory page processed",
-      );
-    },
+async function printMatches(requested: RequiredLimit): Promise<number> {
+  const matches = await listJobMatches(requested === "all" ? undefined : requested);
+  matches.forEach((match, index) =>
+    logger.info(
+      {
+        rank: index + 1,
+        score: match.score,
+        titleScore: match.titleScore,
+        skillScore: match.skillScore,
+        title: match.job.title,
+        agency: match.job.agency.name,
+        location: match.job.location,
+        relevant:
+          match.score >= 60 &&
+          isRelevantJobRole(match.job.title) &&
+          isLikelyJobPageUrl(match.job.jobUrl),
+        matchedTerms: JSON.parse(match.matchedTerms) as string[],
+        missingTerms: JSON.parse(match.missingTerms) as string[],
+        jobUrl: match.job.jobUrl,
+      },
+      "Matched job",
+    ),
+  );
+  return matches.length;
+}
+
+async function runMatch(arguments_: string[]): Promise<void> {
+  const requested = parseRequiredLimit(
+    arguments_[0],
+    "npm run dev -- match <count|--all>",
+  );
+  const summary = await matchJobs({
+    onJob: ({ processed, total, title, score }) =>
+      reportProgress("match", processed, total, "Job scored", { title, score }),
   });
-  const summary = await discoverCandidates(candidates);
-
-  logger.info(summary, "Shopify Partner Directory discovery completed");
+  const returned = await printMatches(requested);
+  logger.info({ ...summary, requested, returned }, "Matching completed");
 }
 
-async function runEnrichment(limitValue: string | undefined): Promise<void> {
-  const effectiveLimitValue = limitValue ?? "25";
-  const limit =
-    effectiveLimitValue.toLowerCase() === "all"
-      ? undefined
-      : Number.parseInt(effectiveLimitValue, 10);
-
-  if (
-    effectiveLimitValue.toLowerCase() !== "all" &&
-    (!Number.isInteger(limit) || (limit ?? 0) < 1)
-  ) {
-    throw new Error("limit must be a positive integer or 'all'");
-  }
-
-  const summary = await enrichAgencies({
-    ...(limit ? { limit } : {}),
-    onAgency: ({ agencyId, name, processed, total }) => {
-      logger.info(
-        { agencyId, name, processed, total },
-        "Agency enrichment processed",
-      );
-    },
-  });
-
-  logger.info(summary, "Homepage and careers enrichment completed");
-}
-
-function parseLimit(value: string | undefined, defaultValue: number): number | undefined {
-  const effectiveValue = value ?? String(defaultValue);
-
-  if (effectiveValue.toLowerCase() === "all") {
-    return undefined;
-  }
-
-  const limit = Number.parseInt(effectiveValue, 10);
-
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new Error("limit must be a positive integer or 'all'");
-  }
-
-  return limit;
-}
-
-async function runJobDiscovery(limitValue: string | undefined): Promise<void> {
-  const limit = parseLimit(limitValue, 10);
-  const summary = await discoverJobs({
-    ...(limit ? { limit } : {}),
-    onAgency: ({ agencyId, name, processed, total, jobsFound }) => {
-      logger.info(
-        { agencyId, name, processed, total, jobsFound },
-        "Careers page processed for jobs",
-      );
-    },
-  });
-
-  logger.info(summary, "Job discovery completed");
+async function runJobs(arguments_: string[]): Promise<void> {
+  const requested = parseRequiredLimit(
+    arguments_[0],
+    "npm run dev -- jobs <count|--all>",
+  );
+  const returned = await printMatches(requested);
+  logger.info({ requested, returned }, "Stored matched jobs listed");
 }
 
 async function main(): Promise<void> {
-  const [command = "status", argument] = process.argv.slice(2);
-
+  const [command, ...arguments_] = process.argv.slice(2);
   switch (command) {
+    case "crawl":
+      await runCrawl(arguments_);
+      break;
+    case "resume":
+      await runResume(arguments_);
+      break;
+    case "match":
+      await runMatch(arguments_);
+      break;
+    case "jobs":
+      await runJobs(arguments_);
+      break;
     case "status":
       await showStatus();
       break;
-    case "discover":
-      await runDiscovery(argument);
-      break;
-    case "discover-shopify":
-      await runShopifyDiscovery(argument);
-      break;
-    case "enrich":
-      await runEnrichment(argument);
-      break;
-    case "discover-jobs":
-      await runJobDiscovery(argument);
-      break;
     default:
-      throw new Error(
-        `Unknown command: ${command}. Available commands: status, discover, discover-shopify, enrich, discover-jobs`,
-      );
+      throw new Error("Usage: npm run dev -- <crawl|resume|match|jobs|status> ...");
   }
 }
 
 main()
   .catch((error: unknown) => {
-    logger.error({ error }, "Command failed");
+    logger.error({ err: error }, "Command failed");
     process.exitCode = 1;
   })
   .finally(async () => {

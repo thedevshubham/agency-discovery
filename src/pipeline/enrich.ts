@@ -21,6 +21,7 @@ export type EnrichmentSummary = {
 
 export type EnrichmentOptions = {
   limit?: number;
+  agencyIds?: number[];
   delayMs?: number;
   onAgency?: (progress: {
     agencyId: number;
@@ -166,13 +167,18 @@ export async function enrichAgencies(
   options: EnrichmentOptions = {},
 ): Promise<EnrichmentSummary> {
   const agencies = await db.agency.findMany({
-    where: {
-      discoverySource: "shopify-partner-directory",
-      careersCheckedAt: null,
-      status: {
-        in: [DiscoveryStatus.DISCOVERED, DiscoveryStatus.FAILED],
-      },
-    },
+    where: options.agencyIds
+      ? {
+          id: { in: options.agencyIds },
+          status: { not: DiscoveryStatus.REJECTED },
+        }
+      : {
+          discoverySource: "shopify-partner-directory",
+          careersCheckedAt: null,
+          status: {
+            in: [DiscoveryStatus.DISCOVERED, DiscoveryStatus.FAILED],
+          },
+        },
     orderBy: { id: "asc" },
     ...(options.limit ? { take: options.limit } : {}),
   });

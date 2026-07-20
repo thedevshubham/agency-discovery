@@ -23,7 +23,6 @@ const normalizedUrlSchema = z.string().transform((value, context) => {
 export const jobCandidateSchema = z.object({
   title: z.string().trim().min(2),
   jobUrl: normalizedUrlSchema,
-  applicationUrl: normalizedUrlSchema.optional(),
   location: z.string().trim().min(1).optional(),
   workplaceType: z.enum(["remote", "hybrid", "onsite"]).optional(),
   employmentType: z.string().trim().min(1).optional(),

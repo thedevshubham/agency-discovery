@@ -167,7 +167,6 @@ export function parseGenericJobsPage(
     const parsed = jobCandidateSchema.safeParse({
       title,
       jobUrl,
-      applicationUrl: jobUrl,
       description: getDescription(link, title),
       source: "generic-careers-page",
     });
